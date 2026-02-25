@@ -86,6 +86,8 @@ python generate_description.py \
   --protein_alphafold_id P36108
 ```
 
+If you do not have an AlphaFoldDB ID, Prot2Text models that use structure (`--use_rgcn`) can now also accept `--protein_sequence`. In this case, a structure is first predicted from sequence with a local ColabFold/AlphaFold installation (`colabfold_batch`) and then used for generation.
+
 You can also use the Esm2Text model to generate protein description based only on the amino-acid sequence (using `--protein_sequence`):
 ```
 python generate_description.py \

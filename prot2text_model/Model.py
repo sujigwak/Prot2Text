@@ -16,7 +16,11 @@ from transformers.generation.configuration_utils import GenerationConfig
 from transformers.generation.logits_process import LogitsProcessorList
 from transformers.generation.stopping_criteria import StoppingCriteriaList
 sys.path.append('../prot2text_dataset')
-from prot2text_dataset.pdb2graph import PDB2Graph, download_alphafold_structure
+from prot2text_dataset.pdb2graph import (
+    PDB2Graph,
+    download_alphafold_structure,
+    predict_alphafold_structure_from_sequence,
+)
 from prot2text_dataset.graphs import *
 from prot2text_dataset.utils_dataset import *
 from graphein.protein.config import ProteinGraphConfig, DSSPConfig
@@ -194,9 +198,9 @@ class Prot2TextModel(PreTrainedModel):
             raise ValueError(
                 "The model you are trying to use is based only on protein sequence, please provide an amino-acid protein_sequence"
             )
-        if self.config.rgcn and protein_pdbID==None and (x==None or edge_index==None or edge_type==None):
+        if self.config.rgcn and protein_pdbID==None and protein_sequence==None and (x==None or edge_index==None or edge_type==None):
             raise ValueError(
-                "The model you are trying to use is based on protein structure, please provide a AlphaFold ID (you must have to have internet connection using protein_pdbID, or provide the triplet inputs: x (node features), edge_index and edge_type"
+                "The model you are trying to use is based on protein structure, please provide a AlphaFold ID or protein_sequence (for AlphaFold prediction), or provide the triplet inputs: x (node features), edge_index and edge_type"
             )
         if self.config.esm:
             esmtokenizer = AutoTokenizer.from_pretrained(self.config.esm_model_name)
@@ -206,7 +210,7 @@ class Prot2TextModel(PreTrainedModel):
                 "you need to provide either a protein AlphaFold Id or an amino-acid sequence"
             )
             
-        if protein_pdbID!=None:
+        if protein_pdbID!=None or (protein_pdbID==None and protein_sequence is not None and self.config.rgcn):
             config = {"node_metadata_functions": [amino_acid_one_hot, 
                                                 expasy_protein_scale,
                                                 meiler_embedding,
@@ -232,9 +236,19 @@ class Prot2TextModel(PreTrainedModel):
             if not isExist:
                 os.makedirs(save_dir+'processed')
             
-            structure_filename = download_alphafold_structure(uniprot_id=protein_pdbID, out_dir=PATH_TO_DATA)
-            if structure_filename is None:
-                raise ValueError("Error! the ID does not exist in AlphaFoldDB or you do not have internet connection")
+            generated_from_sequence = False
+            if protein_pdbID is not None:
+                structure_filename = download_alphafold_structure(uniprot_id=protein_pdbID, out_dir=PATH_TO_DATA)
+                if structure_filename is None:
+                    raise ValueError("Error! the ID does not exist in AlphaFoldDB or you do not have internet connection")
+            else:
+                generated_from_sequence = True
+                structure_filename = predict_alphafold_structure_from_sequence(
+                    protein_sequence=protein_sequence,
+                    out_dir=PATH_TO_DATA,
+                    sequence_name="prot2text_query",
+                )
+
             graph_filename = structure_filename.split('/')
             graph_filename[-2] = 'raw'
             graph_filename[-1] = graph_filename[-1].replace('.pdb', '.pt')
@@ -303,7 +317,8 @@ class Prot2TextModel(PreTrainedModel):
             # ax = sns.heatmap(att_w, cmap="YlGnBu", robust=True, xticklabels=gpdb.sequence[0])#, yticklabels=generated[0])
             # plt.savefig("seaborn_plot.png")
 
-            os.remove(structure_filename)
+            if generated_from_sequence or protein_pdbID is not None:
+                os.remove(structure_filename)
             os.remove(graph_filename)
             os.remove(process_filename)        
                 
