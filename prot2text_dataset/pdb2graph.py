@@ -28,6 +28,7 @@ import os
 import sys
 import subprocess
 import wget
+import tempfile
 
     
 class PDB2Graph():
@@ -167,5 +168,63 @@ def download_alphafold_structure(
         print('Error.. could not download: ', f"AF-{uniprot_id}-F1-model_v{version}.pdb")
         return None
     return structure_filename
+
+
+def predict_alphafold_structure_from_sequence(
+    protein_sequence: str,
+    out_dir: str,
+    sequence_name: str = "query_protein",
+):
+    """Predict a structure from sequence using a local ColabFold/AlphaFold installation.
+
+    This helper expects `colabfold_batch` to be available in PATH.
+    """
+    if protein_sequence is None or len(protein_sequence.strip()) == 0:
+        raise ValueError("protein_sequence should not be empty")
+
+    os.makedirs(out_dir, exist_ok=True)
+    sequence = protein_sequence.strip().upper()
+
+    with tempfile.TemporaryDirectory(prefix="prot2text_colabfold_") as tmp_dir:
+        fasta_path = os.path.join(tmp_dir, "input.fasta")
+        with open(fasta_path, "w", encoding="utf-8") as fasta_file:
+            fasta_file.write(f">{sequence_name}\n{sequence}\n")
+
+        cmd = [
+            "colabfold_batch",
+            fasta_path,
+            out_dir,
+            "--num-models",
+            "1",
+            "--model-type",
+            "alphafold2_ptm",
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+        except FileNotFoundError as exc:
+            raise RuntimeError(
+                "colabfold_batch was not found. Install ColabFold to enable AlphaFold prediction from sequence."
+            ) from exc
+        except subprocess.CalledProcessError as exc:
+            message = exc.stderr.strip() if exc.stderr else str(exc)
+            raise RuntimeError(f"AlphaFold prediction failed: {message}") from exc
+
+    candidate_pdbs = [
+        os.path.join(out_dir, file_name)
+        for file_name in os.listdir(out_dir)
+        if file_name.endswith(".pdb") and sequence_name in file_name
+    ]
+    if not candidate_pdbs:
+        candidate_pdbs = [
+            os.path.join(out_dir, file_name)
+            for file_name in os.listdir(out_dir)
+            if file_name.endswith(".pdb")
+        ]
+
+    if not candidate_pdbs:
+        raise RuntimeError("AlphaFold prediction completed, but no pdb file was produced")
+
+    candidate_pdbs.sort(key=os.path.getmtime, reverse=True)
+    return candidate_pdbs[0]
 
     
